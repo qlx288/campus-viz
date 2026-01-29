@@ -1,6 +1,6 @@
 <template>
   <div class="map-container">
-    <div id="scene3d" class="scene"></div>
+    <div id="cesiumContainer" class="cesium-container"></div>
 
     <div class="map-overlay">
       <div class="map-controls">
@@ -38,14 +38,17 @@
         <span class="info-icon">🎮</span>
         <span class="info-text">左键旋转 | 右键平移 | 滚轮缩放</span>
       </div>
+      <div class="info-item">
+        <span class="info-icon">📍</span>
+        <span class="info-text">内蒙古师范大学 - 和林格尔校区</span>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
-import * as THREE from 'three'
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
+import * as Cesium from 'cesium'
 
 const activeLayer = ref('buildings')
 const stats = ref({
@@ -69,220 +72,189 @@ const legend = [
   { name: '体育馆', color: '#10b981' },
 ]
 
+let viewer = null
+let entities = []
+
 const toggleLayer = (layerId) => {
   activeLayer.value = layerId
 }
 
-let scene, camera, renderer, controls
-let animationId
-
-const typeColors = {
-  teaching: 0x3b82f6,
-  library: 0xec4899,
-  dormitory: 0x06b6d4,
-  lab: 0x8b5cf6,
-  gym: 0x10b981
-}
-
 onMounted(() => {
-  initScene()
-  animate()
-  window.addEventListener('resize', handleResize)
+  initCesium()
 })
 
 onUnmounted(() => {
-  if (animationId) {
-    cancelAnimationFrame(animationId)
-  }
-  window.removeEventListener('resize', handleResize)
-  if (renderer) {
-    renderer.dispose()
+  if (viewer) {
+    viewer.destroy()
   }
 })
 
-const initScene = () => {
-  const container = document.getElementById('scene3d')
-  if (!container) return
+const initCesium = () => {
+  Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlYWE1OWUxNy1mMWZiLTQzYjYtYTQ0OS1kMWFjYmFkNjc5YzciLCJpZCI6NTc3MzcsImlhdCI6MTYxMzQyMjczOH0.XcKpgANiY19MC4bdFUXMVEBToBmqS8kuYpUlxJHYZxk'
 
-  scene = new THREE.Scene()
-  scene.background = new THREE.Color(0x0a0e27)
-
-  camera = new THREE.PerspectiveCamera(
-    60,
-    container.clientWidth / container.clientHeight,
-    0.1,
-    1000
-  )
-  camera.position.set(50, 50, 50)
-
-  renderer = new THREE.WebGLRenderer({ antialias: true })
-  renderer.setSize(container.clientWidth, container.clientHeight)
-  renderer.setPixelRatio(window.devicePixelRatio)
-  renderer.shadowMap.enabled = true
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap
-  container.appendChild(renderer.domElement)
-
-  controls = new OrbitControls(camera, renderer.domElement)
-  controls.enableDamping = true
-  controls.dampingFactor = 0.05
-  controls.minDistance = 20
-  controls.maxDistance = 150
-  controls.maxPolarAngle = Math.PI / 2
-
-  addLights()
-  addGround()
-  addBuildings()
-  addTrees()
-  addRoads()
-}
-
-const addLights = () => {
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.4)
-  scene.add(ambientLight)
-
-  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8)
-  directionalLight.position.set(50, 100, 50)
-  directionalLight.castShadow = true
-  directionalLight.shadow.mapSize.width = 2048
-  directionalLight.shadow.mapSize.height = 2048
-  directionalLight.shadow.camera.near = 0.5
-  directionalLight.shadow.camera.far = 500
-  directionalLight.shadow.camera.left = -100
-  directionalLight.shadow.camera.right = 100
-  directionalLight.shadow.camera.top = 100
-  directionalLight.shadow.camera.bottom = -100
-  scene.add(directionalLight)
-
-  const pointLight = new THREE.PointLight(0x3b82f6, 0.5, 100)
-  pointLight.position.set(0, 30, 0)
-  scene.add(pointLight)
-}
-
-const addGround = () => {
-  const groundGeometry = new THREE.PlaneGeometry(200, 200)
-  const groundMaterial = new THREE.MeshStandardMaterial({
-    color: 0x1a2332,
-    roughness: 0.8,
-    metalness: 0.2
+  viewer = new Cesium.Viewer('cesiumContainer', {
+    terrainProvider: Cesium.createWorldTerrain(),
+    animation: false,
+    timeline: false,
+    baseLayerPicker: false,
+    geocoder: false,
+    homeButton: false,
+    sceneModePicker: false,
+    navigationHelpButton: false,
+    fullscreenButton: false,
+    vrButton: false,
+    infoBox: true,
+    selectionIndicator: true,
+    shadows: true,
+    shouldAnimate: true
   })
-  const ground = new THREE.Mesh(groundGeometry, groundMaterial)
-  ground.rotation.x = -Math.PI / 2
-  ground.receiveShadow = true
-  scene.add(ground)
 
-  const gridHelper = new THREE.GridHelper(200, 50, 0x3b82f6, 0x1a2332)
-  gridHelper.position.y = 0.01
-  scene.add(gridHelper)
-}
+  viewer.scene.globe.enableLighting = true
+  viewer.scene.globe.depthTestAgainstTerrain = true
 
-const createBuilding = (x, z, width, depth, height, color, name) => {
-  const geometry = new THREE.BoxGeometry(width, height, depth)
-  const material = new THREE.MeshStandardMaterial({
-    color: color,
-    roughness: 0.3,
-    metalness: 0.5
+  const lat = 40.7562
+  const lng = 111.8263
+  const height = 500
+
+  viewer.camera.setView({
+    destination: Cesium.Cartesian3.fromDegrees(lng, lat, height),
+    orientation: {
+      heading: Cesium.Math.toRadians(0),
+      pitch: Cesium.Math.toRadians(-45),
+      roll: 0
+    }
   })
-  const building = new THREE.Mesh(geometry, material)
-  building.position.set(x, height / 2, z)
-  building.castShadow = true
-  building.receiveShadow = true
-  building.userData = { name, type: 'building' }
-  scene.add(building)
-  return building
+
+  addCampusBuildings()
+  addCampusLabels()
+  addCampusArea()
 }
 
-const addBuildings = () => {
+const addCampusArea = () => {
+  const positions = Cesium.Cartesian3.fromDegreesArray([
+    111.8220, 40.7590,
+    111.8300, 40.7590,
+    111.8300, 40.7540,
+    111.8220, 40.7540
+  ])
+
+  const entity = viewer.entities.add({
+    name: '校园区域',
+    polygon: {
+      hierarchy: new Cesium.PolygonHierarchy(positions),
+      material: Cesium.Color.BLUE.withAlpha(0.2),
+      outline: true,
+      outlineColor: Cesium.Color.BLUE,
+      outlineWidth: 2,
+      height: 0,
+      perPositionHeight: false
+    }
+  })
+
+  entities.push(entity)
+}
+
+const addCampusBuildings = () => {
   const buildings = [
-    { x: 0, z: 0, w: 20, d: 15, h: 12, color: typeColors.teaching, name: '主教学楼' },
-    { x: -30, z: 10, w: 18, d: 12, h: 10, color: typeColors.library, name: '图书馆' },
-    { x: 30, z: 0, w: 16, d: 14, h: 8, color: typeColors.dormitory, name: '1号宿舍楼' },
-    { x: 30, z: 25, w: 16, d: 14, h: 8, color: typeColors.dormitory, name: '2号宿舍楼' },
-    { x: 30, z: -25, w: 16, d: 14, h: 8, color: typeColors.dormitory, name: '3号宿舍楼' },
-    { x: -20, z: -30, w: 14, d: 10, h: 9, color: typeColors.lab, name: '实验楼' },
-    { x: 0, z: -40, w: 22, d: 16, h: 6, color: typeColors.gym, name: '体育馆' },
-    { x: -40, z: -15, w: 12, d: 10, h: 8, color: typeColors.teaching, name: '2号教学楼' },
-    { x: -40, z: 25, w: 12, d: 10, h: 8, color: typeColors.teaching, name: '3号教学楼' },
-    { x: 20, z: -60, w: 15, d: 12, h: 7, color: typeColors.library, name: '科技楼' },
+    { name: '主教学楼', lng: 111.8263, lat: 40.7562, height: 25, color: '#3b82f6', type: 'teaching' },
+    { name: '图书馆', lng: 111.8280, lat: 40.7575, height: 20, color: '#ec4899', type: 'library' },
+    { name: '1号宿舍楼', lng: 111.8250, lat: 40.7550, height: 18, color: '#06b6d4', type: 'dormitory' },
+    { name: '2号宿舍楼', lng: 111.8255, lat: 40.7560, height: 18, color: '#06b6d4', type: 'dormitory' },
+    { name: '3号宿舍楼', lng: 111.8260, lat: 40.7570, height: 18, color: '#06b6d4', type: 'dormitory' },
+    { name: '实验楼', lng: 111.8285, lat: 40.7555, height: 22, color: '#8b5cf6', type: 'lab' },
+    { name: '体育馆', lng: 111.8240, lat: 40.7580, height: 15, color: '#10b981', type: 'gym' },
+    { name: '2号教学楼', lng: 111.8235, lat: 40.7565, height: 20, color: '#3b82f6', type: 'teaching' },
+    { name: '3号教学楼', lng: 111.8275, lat: 40.7570, height: 20, color: '#3b82f6', type: 'teaching' },
+    { name: '科技楼', lng: 111.8290, lat: 40.7550, height: 18, color: '#f59e0b', type: 'tech' },
+    { name: '行政楼', lng: 111.8270, lat: 40.7585, height: 16, color: '#f97316', type: 'admin' },
+    { name: '食堂', lng: 111.8245, lat: 40.7535, height: 12, color: '#ef4444', type: 'dining' },
   ]
 
-  buildings.forEach(b => {
-    createBuilding(b.x, b.z, b.w, b.d, b.h, b.color, b.name)
-  })
-}
-
-const addTrees = () => {
-  const treePositions = [
-    [-45, 5], [-45, -5], [-50, 0], [-55, 10],
-    [45, 15], [45, -15], [50, 0], [55, 5],
-    [-10, -50], [10, -50], [0, -55], [-20, -45],
-    [-25, 45], [25, 45], [20, 55], [-20, 55],
-  ]
-
-  treePositions.forEach(([x, z]) => {
-    const trunkGeometry = new THREE.CylinderGeometry(0.5, 0.6, 3, 8)
-    const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x4a3728 })
-    const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial)
-    trunk.position.set(x, 1.5, z)
-    trunk.castShadow = true
-    scene.add(trunk)
-
-    const foliageGeometry = new THREE.ConeGeometry(3, 6, 8)
-    const foliageMaterial = new THREE.MeshStandardMaterial({
-      color: 0x228B22,
-      roughness: 0.8
+  buildings.forEach(building => {
+    const entity = viewer.entities.add({
+      name: building.name,
+      position: Cesium.Cartesian3.fromDegrees(building.lng, building.lat, building.height / 2),
+      box: {
+        dimensions: new Cesium.Cartesian3(60.0, building.height, 45.0),
+        material: Cesium.Color.fromCssColorString(building.color).withAlpha(0.8),
+        outline: true,
+        outlineColor: Cesium.Color.WHITE,
+        outlineWidth: 2,
+        shadows: Cesium.ShadowMode.ENABLED
+      },
+      description: `
+        <div style="color: #333; padding: 15px; font-family: Arial, sans-serif;">
+          <h3 style="margin: 0 0 10px 0; color: #3b82f6;">${building.name}</h3>
+          <p style="margin: 5px 0;"><strong>类型：</strong>${getTypeName(building.type)}</p>
+          <p style="margin: 5px 0;"><strong>高度：</strong>${building.height}米</p>
+          <p style="margin: 5px 0;"><strong>坐标：</strong>${building.lat.toFixed(4)}, ${building.lng.toFixed(4)}</p>
+        </div>
+      `
     })
-    const foliage = new THREE.Mesh(foliageGeometry, foliageMaterial)
-    foliage.position.set(x, 5, z)
-    foliage.castShadow = true
-    scene.add(foliage)
+
+    entities.push(entity)
+
+    const label = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(building.lng, building.lat, building.height + 5),
+      label: {
+        text: building.name,
+        font: '14px sans-serif',
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        pixelOffset: new Cesium.Cartesian2(0, -10),
+        showBackground: true,
+        backgroundColor: Cesium.Color.fromCssColorString(building.color).withAlpha(0.7)
+      }
+    })
+
+    entities.push(label)
   })
 }
 
-const addRoads = () => {
-  const roadMaterial = new THREE.MeshStandardMaterial({
-    color: 0x2c3e50,
-    roughness: 0.9
+const addCampusLabels = () => {
+  const labels = [
+    { name: '内蒙古师范大学', lng: 111.8263, lat: 40.7562, offsetY: 80 },
+    { name: '和林格尔校区', lng: 111.8263, lat: 40.7562, offsetY: 60 },
+    { name: '北门', lng: 111.8263, lat: 40.7590, offsetY: 10 },
+    { name: '南门', lng: 111.8263, lat: 40.7540, offsetY: 10 },
+  ]
+
+  labels.forEach(label => {
+    const entity = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(label.lng, label.lat, label.offsetY),
+      label: {
+        text: label.name,
+        font: 'bold 16px sans-serif',
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+        showBackground: true,
+        backgroundColor: Cesium.Color.fromCssColorString('#1a2332').withAlpha(0.9)
+      }
+    })
+
+    entities.push(entity)
   })
-
-  const mainRoad = new THREE.Mesh(
-    new THREE.PlaneGeometry(60, 6),
-    roadMaterial
-  )
-  mainRoad.rotation.x = -Math.PI / 2
-  mainRoad.position.set(0, 0.02, 0)
-  scene.add(mainRoad)
-
-  const sideRoad = new THREE.Mesh(
-    new THREE.PlaneGeometry(6, 100),
-    roadMaterial
-  )
-  sideRoad.rotation.x = -Math.PI / 2
-  sideRoad.position.set(0, 0.02, 0)
-  scene.add(sideRoad)
-
-  const road2 = new THREE.Mesh(
-    new THREE.PlaneGeometry(80, 5),
-    roadMaterial
-  )
-  road2.rotation.x = -Math.PI / 2
-  road2.rotation.z = Math.PI / 4
-  road2.position.set(-20, 0.02, -20)
-  scene.add(road2)
 }
 
-const animate = () => {
-  animationId = requestAnimationFrame(animate)
-  controls.update()
-  renderer.render(scene, camera)
-}
-
-const handleResize = () => {
-  const container = document.getElementById('scene3d')
-  if (!container) return
-
-  camera.aspect = container.clientWidth / container.clientHeight
-  camera.updateProjectionMatrix()
-  renderer.setSize(container.clientWidth, container.clientHeight)
+const getTypeName = (type) => {
+  const types = {
+    teaching: '教学楼',
+    library: '图书馆',
+    dormitory: '宿舍楼',
+    lab: '实验楼',
+    gym: '体育馆',
+    tech: '科技楼',
+    admin: '行政楼',
+    dining: '食堂'
+  }
+  return types[type] || '其他'
 }
 </script>
 
@@ -296,7 +268,7 @@ const handleResize = () => {
   border: 1px solid rgba(59, 130, 246, 0.2);
 }
 
-.scene {
+.cesium-container {
   width: 100%;
   height: 100%;
 }
@@ -420,6 +392,9 @@ const handleResize = () => {
   position: absolute;
   bottom: 20px;
   right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   z-index: 1000;
 }
 
@@ -441,5 +416,13 @@ const handleResize = () => {
 .info-text {
   font-size: 12px;
   color: #e2e8f0;
+}
+
+:deep(.cesium-widget-credits) {
+  display: none !important;
+}
+
+:deep(.cesium-viewer-bottom) {
+  display: none !important;
 }
 </style>
