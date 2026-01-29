@@ -90,10 +90,7 @@ onUnmounted(() => {
 })
 
 const initCesium = () => {
-  Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlYWE1OWUxNy1mMWZiLTQzYjYtYTQ0OS1kMWFjYmFkNjc5YzciLCJpZCI6NTc3MzcsImlhdCI6MTYxMzQyMjczOH0.XcKpgANiY19MC4bdFUXMVEBToBmqS8kuYpUlxJHYZxk'
-
   viewer = new Cesium.Viewer('cesiumContainer', {
-    terrainProvider: Cesium.createWorldTerrain(),
     animation: false,
     timeline: false,
     baseLayerPicker: false,
@@ -108,6 +105,15 @@ const initCesium = () => {
     shadows: true,
     shouldAnimate: true
   })
+
+  viewer.imageryLayers.removeAll()
+
+  const osmLayer = new Cesium.UrlTemplateImageryProvider({
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    subdomains: ['a', 'b', 'c'],
+    credit: '© OpenStreetMap'
+  })
+  viewer.imageryLayers.addImageryProvider(osmLayer)
 
   viewer.scene.globe.enableLighting = true
   viewer.scene.globe.depthTestAgainstTerrain = true
