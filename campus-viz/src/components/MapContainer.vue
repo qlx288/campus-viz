@@ -1,6 +1,6 @@
 <template>
   <div class="map-container">
-    <div id="map" class="map"></div>
+    <div id="scene3d" class="scene"></div>
 
     <div class="map-overlay">
       <div class="map-controls">
@@ -32,15 +32,21 @@
         <div class="map-stat-label">设施点</div>
       </div>
     </div>
+
+    <div class="scene-info">
+      <div class="info-item">
+        <span class="info-icon">🎮</span>
+        <span class="info-text">左键旋转 | 右键平移 | 滚轮缩放</span>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
+import * as THREE from 'three'
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 
-const map = ref(null)
 const activeLayer = ref('buildings')
 const stats = ref({
   buildings: 32,
@@ -67,90 +73,216 @@ const toggleLayer = (layerId) => {
   activeLayer.value = layerId
 }
 
+let scene, camera, renderer, controls
+let animationId
+
+const typeColors = {
+  teaching: 0x3b82f6,
+  library: 0xec4899,
+  dormitory: 0x06b6d4,
+  lab: 0x8b5cf6,
+  gym: 0x10b981
+}
+
 onMounted(() => {
-  initMap()
+  initScene()
+  animate()
+  window.addEventListener('resize', handleResize)
 })
 
 onUnmounted(() => {
-  if (map.value) {
-    map.value.remove()
+  if (animationId) {
+    cancelAnimationFrame(animationId)
+  }
+  window.removeEventListener('resize', handleResize)
+  if (renderer) {
+    renderer.dispose()
   }
 })
 
-const initMap = () => {
-  const lat = 40.7562
-  const lng = 111.8263
-  const zoom = 15
+const initScene = () => {
+  const container = document.getElementById('scene3d')
+  if (!container) return
 
-  map.value = L.map('map', {
-    center: [lat, lng],
-    zoom: zoom,
-    zoomControl: false,
-    attributionControl: false
-  })
+  scene = new THREE.Scene()
+  scene.background = new THREE.Color(0x0a0e27)
 
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    maxZoom: 19,
-    subdomains: 'abcd'
-  }).addTo(map.value)
+  camera = new THREE.PerspectiveCamera(
+    60,
+    container.clientWidth / container.clientHeight,
+    0.1,
+    1000
+  )
+  camera.position.set(50, 50, 50)
 
-  addMarkers()
-  addPolygons()
+  renderer = new THREE.WebGLRenderer({ antialias: true })
+  renderer.setSize(container.clientWidth, container.clientHeight)
+  renderer.setPixelRatio(window.devicePixelRatio)
+  renderer.shadowMap.enabled = true
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap
+  container.appendChild(renderer.domElement)
+
+  controls = new OrbitControls(camera, renderer.domElement)
+  controls.enableDamping = true
+  controls.dampingFactor = 0.05
+  controls.minDistance = 20
+  controls.maxDistance = 150
+  controls.maxPolarAngle = Math.PI / 2
+
+  addLights()
+  addGround()
+  addBuildings()
+  addTrees()
+  addRoads()
 }
 
-const addMarkers = () => {
-  const locations = [
-    { lat: 40.7562, lng: 111.8263, name: '主教学楼', type: 'teaching' },
-    { lat: 40.7575, lng: 111.8280, name: '图书馆', type: 'library' },
-    { lat: 40.7550, lng: 111.8250, name: '1号宿舍楼', type: 'dormitory' },
-    { lat: 40.7555, lng: 111.8285, name: '实验楼', type: 'lab' },
-    { lat: 40.7580, lng: 111.8240, name: '体育馆', type: 'gym' },
+const addLights = () => {
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.4)
+  scene.add(ambientLight)
+
+  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8)
+  directionalLight.position.set(50, 100, 50)
+  directionalLight.castShadow = true
+  directionalLight.shadow.mapSize.width = 2048
+  directionalLight.shadow.mapSize.height = 2048
+  directionalLight.shadow.camera.near = 0.5
+  directionalLight.shadow.camera.far = 500
+  directionalLight.shadow.camera.left = -100
+  directionalLight.shadow.camera.right = 100
+  directionalLight.shadow.camera.top = 100
+  directionalLight.shadow.camera.bottom = -100
+  scene.add(directionalLight)
+
+  const pointLight = new THREE.PointLight(0x3b82f6, 0.5, 100)
+  pointLight.position.set(0, 30, 0)
+  scene.add(pointLight)
+}
+
+const addGround = () => {
+  const groundGeometry = new THREE.PlaneGeometry(200, 200)
+  const groundMaterial = new THREE.MeshStandardMaterial({
+    color: 0x1a2332,
+    roughness: 0.8,
+    metalness: 0.2
+  })
+  const ground = new THREE.Mesh(groundGeometry, groundMaterial)
+  ground.rotation.x = -Math.PI / 2
+  ground.receiveShadow = true
+  scene.add(ground)
+
+  const gridHelper = new THREE.GridHelper(200, 50, 0x3b82f6, 0x1a2332)
+  gridHelper.position.y = 0.01
+  scene.add(gridHelper)
+}
+
+const createBuilding = (x, z, width, depth, height, color, name) => {
+  const geometry = new THREE.BoxGeometry(width, height, depth)
+  const material = new THREE.MeshStandardMaterial({
+    color: color,
+    roughness: 0.3,
+    metalness: 0.5
+  })
+  const building = new THREE.Mesh(geometry, material)
+  building.position.set(x, height / 2, z)
+  building.castShadow = true
+  building.receiveShadow = true
+  building.userData = { name, type: 'building' }
+  scene.add(building)
+  return building
+}
+
+const addBuildings = () => {
+  const buildings = [
+    { x: 0, z: 0, w: 20, d: 15, h: 12, color: typeColors.teaching, name: '主教学楼' },
+    { x: -30, z: 10, w: 18, d: 12, h: 10, color: typeColors.library, name: '图书馆' },
+    { x: 30, z: 0, w: 16, d: 14, h: 8, color: typeColors.dormitory, name: '1号宿舍楼' },
+    { x: 30, z: 25, w: 16, d: 14, h: 8, color: typeColors.dormitory, name: '2号宿舍楼' },
+    { x: 30, z: -25, w: 16, d: 14, h: 8, color: typeColors.dormitory, name: '3号宿舍楼' },
+    { x: -20, z: -30, w: 14, d: 10, h: 9, color: typeColors.lab, name: '实验楼' },
+    { x: 0, z: -40, w: 22, d: 16, h: 6, color: typeColors.gym, name: '体育馆' },
+    { x: -40, z: -15, w: 12, d: 10, h: 8, color: typeColors.teaching, name: '2号教学楼' },
+    { x: -40, z: 25, w: 12, d: 10, h: 8, color: typeColors.teaching, name: '3号教学楼' },
+    { x: 20, z: -60, w: 15, d: 12, h: 7, color: typeColors.library, name: '科技楼' },
   ]
 
-  const typeColors = {
-    teaching: '#3b82f6',
-    library: '#ec4899',
-    dormitory: '#06b6d4',
-    lab: '#8b5cf6',
-    gym: '#10b981'
-  }
+  buildings.forEach(b => {
+    createBuilding(b.x, b.z, b.w, b.d, b.h, b.color, b.name)
+  })
+}
 
-  locations.forEach(loc => {
-    const color = typeColors[loc.type] || '#3b82f6'
+const addTrees = () => {
+  const treePositions = [
+    [-45, 5], [-45, -5], [-50, 0], [-55, 10],
+    [45, 15], [45, -15], [50, 0], [55, 5],
+    [-10, -50], [10, -50], [0, -55], [-20, -45],
+    [-25, 45], [25, 45], [20, 55], [-20, 55],
+  ]
 
-    const icon = L.divIcon({
-      className: 'custom-marker',
-      html: `<div style="width: 30px; height: 30px; background: ${color}; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center;">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
-          <path d="M12 2L2 7L12 12L22 7L12 2Z"/>
-        </svg>
-      </div>`,
-      iconSize: [30, 30],
-      iconAnchor: [15, 15]
+  treePositions.forEach(([x, z]) => {
+    const trunkGeometry = new THREE.CylinderGeometry(0.5, 0.6, 3, 8)
+    const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x4a3728 })
+    const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial)
+    trunk.position.set(x, 1.5, z)
+    trunk.castShadow = true
+    scene.add(trunk)
+
+    const foliageGeometry = new THREE.ConeGeometry(3, 6, 8)
+    const foliageMaterial = new THREE.MeshStandardMaterial({
+      color: 0x228B22,
+      roughness: 0.8
     })
-
-    const marker = L.marker([loc.lat, loc.lng], { icon })
-      .addTo(map.value)
-
-    marker.bindPopup(`<div style="color: #333; padding: 8px;"><strong>${loc.name}</strong></div>`)
+    const foliage = new THREE.Mesh(foliageGeometry, foliageMaterial)
+    foliage.position.set(x, 5, z)
+    foliage.castShadow = true
+    scene.add(foliage)
   })
 }
 
-const addPolygons = () => {
-  const campusArea = [
-    [40.7590, 111.8220],
-    [40.7590, 111.8300],
-    [40.7540, 111.8300],
-    [40.7540, 111.8220]
-  ]
+const addRoads = () => {
+  const roadMaterial = new THREE.MeshStandardMaterial({
+    color: 0x2c3e50,
+    roughness: 0.9
+  })
 
-  L.polygon(campusArea, {
-    color: '#3b82f6',
-    weight: 2,
-    fillColor: '#3b82f6',
-    fillOpacity: 0.1,
-    dashArray: '5, 10'
-  }).addTo(map.value)
+  const mainRoad = new THREE.Mesh(
+    new THREE.PlaneGeometry(60, 6),
+    roadMaterial
+  )
+  mainRoad.rotation.x = -Math.PI / 2
+  mainRoad.position.set(0, 0.02, 0)
+  scene.add(mainRoad)
+
+  const sideRoad = new THREE.Mesh(
+    new THREE.PlaneGeometry(6, 100),
+    roadMaterial
+  )
+  sideRoad.rotation.x = -Math.PI / 2
+  sideRoad.position.set(0, 0.02, 0)
+  scene.add(sideRoad)
+
+  const road2 = new THREE.Mesh(
+    new THREE.PlaneGeometry(80, 5),
+    roadMaterial
+  )
+  road2.rotation.x = -Math.PI / 2
+  road2.rotation.z = Math.PI / 4
+  road2.position.set(-20, 0.02, -20)
+  scene.add(road2)
+}
+
+const animate = () => {
+  animationId = requestAnimationFrame(animate)
+  controls.update()
+  renderer.render(scene, camera)
+}
+
+const handleResize = () => {
+  const container = document.getElementById('scene3d')
+  if (!container) return
+
+  camera.aspect = container.clientWidth / container.clientHeight
+  camera.updateProjectionMatrix()
+  renderer.setSize(container.clientWidth, container.clientHeight)
 }
 </script>
 
@@ -164,7 +296,7 @@ const addPolygons = () => {
   border: 1px solid rgba(59, 130, 246, 0.2);
 }
 
-.map {
+.scene {
   width: 100%;
   height: 100%;
 }
@@ -284,20 +416,30 @@ const addPolygons = () => {
   color: #a0aec0;
 }
 
-:deep(.custom-marker) {
-  background: transparent !important;
-  border: none !important;
+.scene-info {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  z-index: 1000;
 }
 
-:deep(.leaflet-popup-content-wrapper) {
-  background: rgba(22, 36, 71, 0.95);
+.info-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: rgba(16, 24, 56, 0.95);
   border: 1px solid rgba(59, 130, 246, 0.3);
-  border-radius: 8px;
-  color: #ffffff;
+  border-radius: 10px;
+  backdrop-filter: blur(10px);
 }
 
-:deep(.leaflet-popup-tip) {
-  background: rgba(22, 36, 71, 0.95);
-  border: 1px solid rgba(59, 130, 246, 0.3);
+.info-icon {
+  font-size: 16px;
+}
+
+.info-text {
+  font-size: 12px;
+  color: #e2e8f0;
 }
 </style>
